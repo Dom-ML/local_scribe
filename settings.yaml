@@ -3,3 +3,18 @@ language: English
 sample_rate: 16000
 level_bar_width: 30
 transcribe_only: null
+
+summarization:
+  enabled: true
+  model: mlx-community/LFM2-2.6B-Transcript-4bit
+  temperature: 0.3
+  max_tokens: 512
+  summary_type: executive
+  system_prompt: "You are an expert meeting analyst. Analyze the transcript carefully and provide clear, accurate information based on the content."
+  prompts:
+    executive: "Provide a brief executive summary (2-3 sentences) of the key outcomes and decisions."
+    detailed: "Provide a detailed summary covering all major topics, discussions, and outcomes."
+    action_items: "List the specific action items assigned during this meeting."
+    key_decisions: "List the key decisions that were made during this meeting."
+    participants: "List the participants mentioned in this transcript."
+    topics: "List the main topics and subjects that were discussed."

@@ -5,6 +5,7 @@ description = "Local speech-to-text transcription using Qwen ASR on Apple Silico
 requires-python = ">=3.11"
 dependencies = [
     "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git",
+    "mlx-lm",
     "pyyaml",
     "sounddevice",
     "soundfile",
