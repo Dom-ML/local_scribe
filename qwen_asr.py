@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-"""Local speech-to-text transcription using Qwen ASR on Apple Silicon."""
-
 from pathlib import Path
 
 import numpy as np
