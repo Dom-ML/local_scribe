@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -7,6 +8,8 @@ import yaml
 from mlx_audio.stt import load
 
 SETTINGS_FILE = Path(__file__).parent / "settings.yaml"
+TRANSCRIPTS_DIR = Path(__file__).parent / "transcripts"
+MODEL_NAME = "mlx-community/Qwen3-ASR-0.6B-8bit"
 
 
 def load_settings() -> dict:
@@ -18,8 +21,8 @@ def load_settings() -> dict:
     return defaults
 
 
-def select_input_device() -> int:
-    """Display available input devices and let user select one."""
+def select_input_device() -> tuple[int, str]:
+    """Display available input devices and let user select one. Returns (index, name)."""
     devices = [(i, dev["name"]) for i, dev in enumerate(sd.query_devices()) if dev["max_input_channels"] > 0]
     print("Select audio input device:")
     for i, (idx, name) in enumerate(devices):
@@ -28,7 +31,7 @@ def select_input_device() -> int:
         try:
             choice = int(input("\nEnter number: ")) - 1
             if 0 <= choice < len(devices):
-                return devices[choice][0]
+                return devices[choice]
             print("Invalid selection, try again.")
         except ValueError:
             print("Enter a number.")
@@ -61,9 +64,22 @@ def save_audio(audio: np.ndarray, output_path: str, sample_rate: int) -> None:
 def transcribe(audio_path: str, language: str) -> str:
     """Transcribe audio file using Qwen ASR."""
     print("Transcribing...")
-    model = load("mlx-community/Qwen3-ASR-0.6B-8bit")
+    model = load(MODEL_NAME)
     result = model.generate(audio_path, language=language)
     return result.text
+
+
+def save_transcript(text: str, device_name: str, language: str) -> Path:
+    """Save transcript as markdown with YAML frontmatter, organized by day."""
+    now = datetime.now()
+    day_dir = TRANSCRIPTS_DIR / now.strftime("%Y-%m-%d")
+    day_dir.mkdir(parents=True, exist_ok=True)
+    filename = now.strftime("%Y-%m-%d_%H-%M-%S.md")
+    filepath = day_dir / filename
+    metadata = {"timestamp": now.isoformat(), "device": device_name, "model": MODEL_NAME, "language": language}
+    content = f"---\n{yaml.dump(metadata, default_flow_style=False)}---\n\n{text}\n"
+    filepath.write_text(content)
+    return filepath
 
 
 def main() -> None:
@@ -72,14 +88,16 @@ def main() -> None:
 
     if settings.get("transcribe_only"):
         text = transcribe(settings["transcribe_only"], settings["language"])
-        print(f"\n{text}")
+        filepath = save_transcript(text, "file", settings["language"])
+        print(f"\n{text}\n\nSaved to: {filepath}")
         return
 
-    device = select_input_device()
-    audio = record_audio(device, settings["sample_rate"], settings["level_bar_width"])
+    device_index, device_name = select_input_device()
+    audio = record_audio(device_index, settings["sample_rate"], settings["level_bar_width"])
     save_audio(audio, settings["output"], settings["sample_rate"])
     text = transcribe(settings["output"], settings["language"])
-    print(f"\n{text}")
+    filepath = save_transcript(text, device_name, settings["language"])
+    print(f"\n{text}\n\nSaved to: {filepath}")
 
 
 if __name__ == "__main__":
