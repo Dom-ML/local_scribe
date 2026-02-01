@@ -1,5 +1,11 @@
+import os
 from datetime import datetime
 from pathlib import Path
+
+# Set local model cache before importing HF-dependent libraries
+MODELS_DIR = Path(__file__).parent / "models"
+MODELS_DIR.mkdir(exist_ok=True)
+os.environ["HF_HUB_CACHE"] = str(MODELS_DIR)
 
 import numpy as np
 import sounddevice as sd

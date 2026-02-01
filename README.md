@@ -11,26 +11,29 @@ uv sync
 ## Usage
 
 ```bash
-# List available audio input devices
-uv run python qwen_asr.py --list-devices
-
-# Record and transcribe (10 seconds default)
-uv run python qwen_asr.py -d <device_index>
-
-# Record with custom duration
-uv run python qwen_asr.py -d 0 -t 30
-
-# Transcribe an existing audio file
-uv run python qwen_asr.py -T audio.wav
+# Record and transcribe (interactive device selection)
+uv run python qwen_asr.py
 ```
 
-## Options
+Configure via `settings.yaml`:
 
-| Option | Description |
-|--------|-------------|
-| `--list-devices` | List available audio input devices |
-| `-d, --device` | Audio input device index |
-| `-t, --duration` | Recording duration in seconds (default: 10) |
-| `-o, --output` | Output audio file path (default: recording.wav) |
-| `-l, --language` | Transcription language (default: English) |
-| `-T, --transcribe-only` | Transcribe existing audio file |
+```yaml
+output: recording.wav
+language: English
+sample_rate: 16000
+level_bar_width: 30
+transcribe_only: null  # Set to audio file path to transcribe existing file
+
+summarization:
+  enabled: false       # Set to true to enable AI summarization
+  model: mlx-community/LFM2-2.6B-Transcript-4bit
+  summary_type: executive  # executive, detailed, action_items, key_decisions, participants, topics
+```
+
+## Features
+
+- Interactive audio device selection
+- Real-time recording level display
+- Transcripts saved as markdown with YAML frontmatter in `transcripts/YYYY-MM-DD/`
+- Optional AI summarization using LFM2
+- Models cached locally in `models/` directory

@@ -18,3 +18,9 @@ venv/
 # Claude Code
 CLAUDE.md
 .claude/
+
+# Local model cache
+models/
+
+# Transcripts
+transcripts/
