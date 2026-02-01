@@ -4,6 +4,12 @@ sample_rate: 16000
 level_bar_width: 30
 transcribe_only: null
 
+diarization:
+  enabled: true
+  model: pyannote/speaker-diarization-community-1
+  min_speakers: null
+  max_speakers: null
+
 summarization:
   enabled: true
   model: mlx-community/LFM2-2.6B-Transcript-4bit
