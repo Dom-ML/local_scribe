@@ -1,62 +1,64 @@
 #!/usr/bin/env python3
 """Local speech-to-text transcription using Qwen ASR on Apple Silicon."""
 
-import argparse
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
+import yaml
 from mlx_audio.stt import load
 
-DEFAULT_DURATION = 10
-DEFAULT_OUTPUT_FILE = "recording.wav"
-DEFAULT_LANGUAGE = "English"
-SAMPLE_RATE = 16000
-LEVEL_BAR_WIDTH = 30
+SETTINGS_FILE = Path(__file__).parent / "settings.yaml"
 
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description="Local speech-to-text transcription using Qwen ASR")
-    parser.add_argument("--list-devices", action="store_true", help="List available audio input devices")
-    parser.add_argument("-d", "--device", type=int, help="Audio input device index")
-    parser.add_argument("-t", "--duration", type=int, default=DEFAULT_DURATION, help=f"Recording duration in seconds (default: {DEFAULT_DURATION})")
-    parser.add_argument("-o", "--output", type=str, default=DEFAULT_OUTPUT_FILE, help=f"Output audio file path (default: {DEFAULT_OUTPUT_FILE})")
-    parser.add_argument("-l", "--language", type=str, default=DEFAULT_LANGUAGE, help=f"Transcription language (default: {DEFAULT_LANGUAGE})")
-    parser.add_argument("-T", "--transcribe-only", type=str, metavar="FILE", help="Transcribe existing audio file")
-    return parser.parse_args()
+def load_settings() -> dict:
+    """Load settings from YAML file."""
+    defaults = {"output": "recording.wav", "language": "English", "sample_rate": 16000, "level_bar_width": 30, "transcribe_only": None}
+    if SETTINGS_FILE.exists():
+        with open(SETTINGS_FILE) as f:
+            return {**defaults, **yaml.safe_load(f)}
+    return defaults
 
 
-def list_input_devices() -> None:
-    """Print available audio input devices."""
-    print("Audio input devices:")
-    for i, dev in enumerate(sd.query_devices()):
-        if dev["max_input_channels"] > 0:
-            print(f"  [{i}] {dev['name']}")
+def select_input_device() -> int:
+    """Display available input devices and let user select one."""
+    devices = [(i, dev["name"]) for i, dev in enumerate(sd.query_devices()) if dev["max_input_channels"] > 0]
+    print("Select audio input device:")
+    for i, (idx, name) in enumerate(devices):
+        print(f"  [{i + 1}] {name}")
+    while True:
+        try:
+            choice = int(input("\nEnter number: ")) - 1
+            if 0 <= choice < len(devices):
+                return devices[choice][0]
+            print("Invalid selection, try again.")
+        except ValueError:
+            print("Enter a number.")
 
 
-def record_audio(device: int, duration: int) -> np.ndarray:
-    """Record audio from the specified device with live level display."""
-    print(f"Recording {duration}s... (speak now)")
+def record_audio(device: int, sample_rate: int, level_bar_width: int) -> np.ndarray:
+    """Record audio from the specified device until Enter is pressed."""
+    print("\nRecording... (press Enter to stop)")
     audio_chunks: list[np.ndarray] = []
 
     def callback(indata: np.ndarray, frames: int, time, status) -> None:
         audio_chunks.append(indata.copy())
         rms = np.sqrt(np.mean(indata**2))
-        level = min(int(rms * 200), LEVEL_BAR_WIDTH)
-        bar = "\u2588" * level + "\u2591" * (LEVEL_BAR_WIDTH - level)
+        level = min(int(rms * 200), level_bar_width)
+        bar = "\u2588" * level + "\u2591" * (level_bar_width - level)
         print(f"\r  [{bar}] ", end="", flush=True)
 
-    with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, device=device, dtype="float32", callback=callback):
-        sd.sleep(duration * 1000)
+    with sd.InputStream(samplerate=sample_rate, channels=1, device=device, dtype="float32", callback=callback):
+        input()
 
     print()
     return np.concatenate(audio_chunks)
 
 
-def save_audio(audio: np.ndarray, output_path: str) -> None:
+def save_audio(audio: np.ndarray, output_path: str, sample_rate: int) -> None:
     """Save audio data to a WAV file."""
-    sf.write(output_path, audio, SAMPLE_RATE)
+    sf.write(output_path, audio, sample_rate)
 
 
 def transcribe(audio_path: str, language: str) -> str:
@@ -69,25 +71,17 @@ def transcribe(audio_path: str, language: str) -> str:
 
 def main() -> None:
     """Main entry point."""
-    args = parse_args()
+    settings = load_settings()
 
-    if args.list_devices:
-        list_input_devices()
-        return
-
-    if args.transcribe_only:
-        text = transcribe(args.transcribe_only, args.language)
+    if settings.get("transcribe_only"):
+        text = transcribe(settings["transcribe_only"], settings["language"])
         print(f"\n{text}")
         return
 
-    if args.device is None:
-        list_input_devices()
-        print("\nError: Device index required. Use -d <index> to specify.")
-        raise SystemExit(1)
-
-    audio = record_audio(args.device, args.duration)
-    save_audio(audio, args.output)
-    text = transcribe(args.output, args.language)
+    device = select_input_device()
+    audio = record_audio(device, settings["sample_rate"], settings["level_bar_width"])
+    save_audio(audio, settings["output"], settings["sample_rate"])
+    text = transcribe(settings["output"], settings["language"])
     print(f"\n{text}")
 
 

@@ -1,0 +1,16 @@
+# Local Scribe Settings
+
+# Output audio file path
+output: recording.wav
+
+# Transcription language
+language: English
+
+# Audio sample rate in Hz
+sample_rate: 16000
+
+# Width of the audio level bar display
+level_bar_width: 30
+
+# Set to an existing audio file path to transcribe instead of recording
+transcribe_only: null

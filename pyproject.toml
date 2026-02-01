@@ -1,0 +1,11 @@
+[project]
+name = "local-scribe"
+version = "0.1.0"
+description = "Local speech-to-text transcription using Qwen ASR on Apple Silicon"
+requires-python = ">=3.11"
+dependencies = [
+    "mlx-audio @ git+https://github.com/Blaizzy/mlx-audio.git",
+    "pyyaml",
+    "sounddevice",
+    "soundfile",
+]
