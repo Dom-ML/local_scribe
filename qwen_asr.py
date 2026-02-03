@@ -135,6 +135,12 @@ def diarize(audio_path: str, settings: dict) -> list[dict]:
     segments = []
     for turn, _, speaker in result.speaker_diarization.itertracks(yield_label=True):
         segments.append({"start": turn.start, "end": turn.end, "speaker": speaker})
+
+    # Release PyTorch diarization model before MLX ASR loads
+    del pipeline, result, waveform, audio_input
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
     return segments
 
 
@@ -204,11 +210,15 @@ def transcribe(audio_path: str, language: str) -> str:
 
 def summarize(text: str, settings: dict, timestamp: datetime, duration_seconds: float | None = None, segments: list[dict] | None = None) -> str | None:
     """Summarize transcript using LFM2."""
+    import mlx.core as mx
     from mlx_lm import generate, load as load_lm
     from mlx_lm.sample_utils import make_sampler
 
     sum_settings = settings["summarization"]
     print("Summarizing...")
+
+    # Free ASR model memory before loading summarization model
+    mx.clear_cache()
 
     formatted_transcript = format_transcript_for_llm(text, timestamp, duration_seconds, segments)
     summary_type = sum_settings["summary_type"]
