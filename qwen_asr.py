@@ -44,7 +44,8 @@ def load_settings() -> dict:
         },
     }
     diarization_defaults = {"enabled": False, "model": DIARIZATION_MODEL, "min_speakers": None, "max_speakers": None}
-    defaults = {"output": "recording.wav", "language": "English", "sample_rate": 16000, "level_bar_width": 30, "transcribe_only": None, "summarization": summarization_defaults, "diarization": diarization_defaults}
+    system_audio_defaults = {"enabled": False, "device": None, "output": "recording_system.wav", "gain": 1.0}
+    defaults = {"output": "recording.wav", "language": "English", "sample_rate": 16000, "level_bar_width": 30, "transcribe_only": None, "summarization": summarization_defaults, "diarization": diarization_defaults, "system_audio": system_audio_defaults}
     if SETTINGS_FILE.exists():
         with open(SETTINGS_FILE) as f:
             user_settings = yaml.safe_load(f) or {}
@@ -55,6 +56,8 @@ def load_settings() -> dict:
                     merged["summarization"]["prompts"] = {**summarization_defaults["prompts"], **user_settings["summarization"]["prompts"]}
             if "diarization" in user_settings:
                 merged["diarization"] = {**diarization_defaults, **user_settings["diarization"]}
+            if "system_audio" in user_settings:
+                merged["system_audio"] = {**system_audio_defaults, **user_settings["system_audio"]}
             return merged
     return defaults
 
@@ -70,6 +73,30 @@ def select_input_device() -> tuple[int, str]:
             choice = int(input("\nEnter number: ")) - 1
             if 0 <= choice < len(devices):
                 return devices[choice]
+            print("Invalid selection, try again.")
+        except ValueError:
+            print("Enter a number.")
+
+
+def select_system_device(settings: dict) -> tuple[int, str] | None:
+    """Auto-detect or match a system audio input device (e.g. BlackHole). Returns (index, name) or None."""
+    sys_settings = settings["system_audio"]
+    search_term = sys_settings["device"].lower() if sys_settings["device"] else "blackhole"
+    matches = [(i, dev["name"]) for i, dev in enumerate(sd.query_devices()) if dev["max_input_channels"] > 0 and search_term in dev["name"].lower()]
+    if not matches:
+        print(f"Warning: No system audio device matching '{search_term}' found. Falling back to mic-only.")
+        return None
+    if len(matches) == 1:
+        print(f"System audio device: {matches[0][1]}")
+        return matches[0]
+    print("Multiple system audio devices found:")
+    for i, (idx, name) in enumerate(matches):
+        print(f"  [{i + 1}] {name}")
+    while True:
+        try:
+            choice = int(input("\nSelect system audio device: ")) - 1
+            if 0 <= choice < len(matches):
+                return matches[choice]
             print("Invalid selection, try again.")
         except ValueError:
             print("Enter a number.")
@@ -92,6 +119,43 @@ def record_audio(device: int, sample_rate: int, level_bar_width: int) -> np.ndar
 
     print()
     return np.concatenate(audio_chunks)
+
+
+def record_dual_audio(mic_device: int, sys_device: int, sample_rate: int, level_bar_width: int, gain: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
+    """Record from mic and system audio devices simultaneously until Enter is pressed."""
+    print("\nRecording from mic + system audio... (press Enter to stop)")
+    mic_chunks: list[np.ndarray] = []
+    sys_chunks: list[np.ndarray] = []
+    sys_sample_rate = int(sd.query_devices(sys_device)["default_samplerate"])
+
+    def mic_callback(indata: np.ndarray, frames: int, time, status) -> None:
+        mic_chunks.append(indata.copy())
+        rms = np.sqrt(np.mean(indata**2))
+        level = min(int(rms * 200), level_bar_width)
+        bar = "\u2588" * level + "\u2591" * (level_bar_width - level)
+        print(f"\r  [{bar}] ", end="", flush=True)
+
+    def sys_callback(indata: np.ndarray, frames: int, time, status) -> None:
+        sys_chunks.append(indata.copy())
+
+    with sd.InputStream(samplerate=sample_rate, channels=1, device=mic_device, dtype="float32", callback=mic_callback), sd.InputStream(samplerate=sys_sample_rate, channels=1, device=sys_device, dtype="float32", callback=sys_callback):
+        input()
+
+    print()
+    mic_audio = np.concatenate(mic_chunks)
+    sys_audio = np.concatenate(sys_chunks)
+
+    if sys_sample_rate != sample_rate:
+        import librosa
+        print(f"Resampling system audio from {sys_sample_rate}Hz to {sample_rate}Hz...")
+        sys_audio = librosa.resample(sys_audio.flatten(), orig_sr=sys_sample_rate, target_sr=sample_rate)
+        sys_audio = sys_audio.reshape(-1, 1)
+
+    if gain != 1.0:
+        sys_audio = sys_audio * gain
+        sys_audio = np.clip(sys_audio, -1.0, 1.0)
+
+    return mic_audio, sys_audio
 
 
 def save_audio(audio: np.ndarray, output_path: str, sample_rate: int) -> None:
@@ -182,6 +246,8 @@ def format_transcript_for_llm(text: str, timestamp: datetime, duration_seconds: 
         body_lines = []
         for seg in segments:
             speaker_label = speaker_map[seg["speaker"]]
+            if "source" in seg:
+                speaker_label += f" [{seg['source']}]"
             body_lines.append(f"**{speaker_label}**: {seg['text']}")
         body = "\n\n".join(body_lines)
     else:
@@ -206,6 +272,35 @@ def transcribe(audio_path: str, language: str) -> str:
     model = load(MODEL_NAME)
     result = model.generate(audio_path, language=language)
     return result.text
+
+
+def merge_transcripts(mic_segments: list[dict] | None, mic_text: str, sys_segments: list[dict] | None, sys_text: str) -> tuple[list[dict] | None, str]:
+    """Merge mic and system audio transcripts. Tags segments with source and sorts chronologically."""
+    if mic_segments and sys_segments:
+        for seg in mic_segments:
+            seg["source"] = "mic"
+        for seg in sys_segments:
+            seg["source"] = "system"
+        merged = sorted(mic_segments + sys_segments, key=lambda s: s["start"])
+        text = " ".join(seg["text"] for seg in merged)
+        return merged, text
+    if mic_segments and not sys_segments:
+        for seg in mic_segments:
+            seg["source"] = "mic"
+        sys_seg = {"start": 0.0, "end": 0.0, "speaker": "SYSTEM", "text": sys_text, "source": "system"}
+        merged = sorted(mic_segments + [sys_seg], key=lambda s: s["start"])
+        text = " ".join(seg["text"] for seg in merged)
+        return merged, text
+    if sys_segments and not mic_segments:
+        for seg in sys_segments:
+            seg["source"] = "system"
+        mic_seg = {"start": 0.0, "end": 0.0, "speaker": "MIC", "text": mic_text, "source": "mic"}
+        merged = sorted([mic_seg] + sys_segments, key=lambda s: s["start"])
+        text = " ".join(seg["text"] for seg in merged)
+        return merged, text
+    # Neither has segments
+    combined = f"[mic] {mic_text}\n\n[system] {sys_text}"
+    return None, combined
 
 
 def summarize(text: str, settings: dict, timestamp: datetime, duration_seconds: float | None = None, segments: list[dict] | None = None) -> str | None:
@@ -236,7 +331,7 @@ def summarize(text: str, settings: dict, timestamp: datetime, duration_seconds: 
     return response
 
 
-def save_transcript(text: str, device_name: str, language: str, summary: str | None = None, summary_type: str | None = None, summary_model: str | None = None, segments: list[dict] | None = None, diarization_model: str | None = None) -> Path:
+def save_transcript(text: str, device_name: str, language: str, summary: str | None = None, summary_type: str | None = None, summary_model: str | None = None, segments: list[dict] | None = None, diarization_model: str | None = None, system_device_name: str | None = None) -> Path:
     """Save transcript as markdown with YAML frontmatter, organized by day."""
     now = datetime.now()
     day_dir = TRANSCRIPTS_DIR / now.strftime("%Y-%m-%d")
@@ -244,6 +339,8 @@ def save_transcript(text: str, device_name: str, language: str, summary: str | N
     filename = now.strftime("%Y-%m-%d_%H-%M-%S.md")
     filepath = day_dir / filename
     metadata = {"timestamp": now.isoformat(), "device": device_name, "model": MODEL_NAME, "language": language}
+    if system_device_name:
+        metadata["system_device"] = system_device_name
     if diarization_model:
         metadata["diarization_model"] = diarization_model
         unique_speakers = len(set(seg["speaker"] for seg in segments)) if segments else 0
@@ -263,6 +360,8 @@ def save_transcript(text: str, device_name: str, language: str, summary: str | N
         body_lines = []
         for seg in segments:
             speaker_label = speaker_map[seg["speaker"]]
+            if "source" in seg:
+                speaker_label += f" [{seg['source']}]"
             body_lines.append(f"**{speaker_label}**: {seg['text']}")
         body = "\n\n".join(body_lines)
     else:
@@ -287,9 +386,23 @@ def print_transcript(segments: list[dict] | None, text: str) -> None:
         print()
         for seg in segments:
             speaker_label = speaker_map[seg["speaker"]]
+            if "source" in seg:
+                speaker_label += f" [{seg['source']}]"
             print(f"**{speaker_label}**: {seg['text']}\n")
     else:
         print(f"\n{text}")
+
+
+def _process_audio(audio_path: str, settings: dict) -> tuple[list[dict] | None, str]:
+    """Run diarization (if enabled) and transcription on a single audio file. Returns (segments, text)."""
+    diar_settings = settings["diarization"]
+    if diar_settings["enabled"]:
+        segments = diarize(audio_path, settings)
+        segments = transcribe_segments(audio_path, segments, settings["language"])
+        text = " ".join(seg["text"] for seg in segments)
+        return segments, text
+    text = transcribe(audio_path, settings["language"])
+    return None, text
 
 
 def main() -> None:
@@ -297,19 +410,27 @@ def main() -> None:
     settings = load_settings()
     sum_settings = settings["summarization"]
     diar_settings = settings["diarization"]
+    sys_settings = settings["system_audio"]
     now = datetime.now()
 
     if settings.get("transcribe_only"):
-        audio_path = settings["transcribe_only"]
-        segments = None
-        if diar_settings["enabled"]:
-            segments = diarize(audio_path, settings)
-            segments = transcribe_segments(audio_path, segments, settings["language"])
-            text = " ".join(seg["text"] for seg in segments)
+        transcribe_only = settings["transcribe_only"]
+        # Support dict form: {mic: file1.wav, system: file2.wav}
+        if isinstance(transcribe_only, dict):
+            mic_path = transcribe_only["mic"]
+            sys_path = transcribe_only["system"]
+            print(f"Processing mic audio: {mic_path}")
+            mic_segments, mic_text = _process_audio(mic_path, settings)
+            print(f"Processing system audio: {sys_path}")
+            sys_segments, sys_text = _process_audio(sys_path, settings)
+            segments, text = merge_transcripts(mic_segments, mic_text, sys_segments, sys_text)
+            system_device_name = "file"
         else:
-            text = transcribe(audio_path, settings["language"])
+            mic_segments, text = _process_audio(transcribe_only, settings)
+            segments = mic_segments
+            system_device_name = None
         summary = summarize(text, settings, now, segments=segments) if sum_settings["enabled"] else None
-        filepath = save_transcript(text, "file", settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None)
+        filepath = save_transcript(text, "file", settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None, system_device_name=system_device_name)
         print_transcript(segments, text)
         if summary:
             print(f"\n## Summary ({sum_settings['summary_type']})\n\n{summary}")
@@ -317,20 +438,31 @@ def main() -> None:
         return
 
     device_index, device_name = select_input_device()
-    audio = record_audio(device_index, settings["sample_rate"], settings["level_bar_width"])
-    save_audio(audio, settings["output"], settings["sample_rate"])
-    duration_seconds = len(audio) / settings["sample_rate"]
+    sys_device = None
+    sys_device_name = None
+    if sys_settings["enabled"]:
+        result = select_system_device(settings)
+        if result:
+            sys_device, sys_device_name = result
 
-    segments = None
-    if diar_settings["enabled"]:
-        segments = diarize(settings["output"], settings)
-        segments = transcribe_segments(settings["output"], segments, settings["language"])
-        text = " ".join(seg["text"] for seg in segments)
+    if sys_device is not None:
+        mic_audio, sys_audio = record_dual_audio(device_index, sys_device, settings["sample_rate"], settings["level_bar_width"], gain=sys_settings["gain"])
+        save_audio(mic_audio, settings["output"], settings["sample_rate"])
+        save_audio(sys_audio, sys_settings["output"], settings["sample_rate"])
+        duration_seconds = len(mic_audio) / settings["sample_rate"]
+        print(f"Processing mic audio: {settings['output']}")
+        mic_segments, mic_text = _process_audio(settings["output"], settings)
+        print(f"Processing system audio: {sys_settings['output']}")
+        sys_segments, sys_text = _process_audio(sys_settings["output"], settings)
+        segments, text = merge_transcripts(mic_segments, mic_text, sys_segments, sys_text)
     else:
-        text = transcribe(settings["output"], settings["language"])
+        audio = record_audio(device_index, settings["sample_rate"], settings["level_bar_width"])
+        save_audio(audio, settings["output"], settings["sample_rate"])
+        duration_seconds = len(audio) / settings["sample_rate"]
+        segments, text = _process_audio(settings["output"], settings)
 
     summary = summarize(text, settings, now, duration_seconds, segments=segments) if sum_settings["enabled"] else None
-    filepath = save_transcript(text, device_name, settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None)
+    filepath = save_transcript(text, device_name, settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None, system_device_name=sys_device_name)
     print_transcript(segments, text)
     if summary:
         print(f"\n## Summary ({sum_settings['summary_type']})\n\n{summary}")

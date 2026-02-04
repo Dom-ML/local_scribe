@@ -4,6 +4,12 @@ sample_rate: 16000
 level_bar_width: 30
 transcribe_only: null
 
+system_audio:
+  enabled: false
+  device: null
+  output: recording_system.wav
+  gain: 1.0  # Multiplier for system audio volume (e.g. 1.5 to boost 50% if macOS ducks audio)
+
 diarization:
   enabled: true
   model: pyannote/speaker-diarization-community-1

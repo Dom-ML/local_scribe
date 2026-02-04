@@ -22,7 +22,13 @@ output: recording.wav
 language: English
 sample_rate: 16000
 level_bar_width: 30
-transcribe_only: null  # Set to audio file path to transcribe existing file
+transcribe_only: null  # Set to audio file path, or {mic: file1.wav, system: file2.wav}
+
+system_audio:
+  enabled: false              # Set to true to capture system audio alongside mic
+  device: null                # Device name substring to match (defaults to "blackhole")
+  output: recording_system.wav
+  gain: 1.0                   # Multiplier for system audio volume (e.g. 1.5 to boost 50%)
 
 diarization:
   enabled: false       # Set to true to identify speakers
@@ -55,10 +61,46 @@ Speaker diarization identifies and labels different speakers in the audio. To en
      enabled: true
    ```
 
+## System Audio Capture (Optional)
+
+Capture system audio (e.g. from a meeting app) alongside your microphone. Disabled by default.
+
+### Setup
+
+1. Install [BlackHole](https://existential.audio/blackhole/) (2ch):
+   ```bash
+   brew install blackhole-2ch
+   # Reboot required after install
+   ```
+
+2. Open **Audio MIDI Setup** (in /Applications/Utilities):
+   - Click `+` bottom-left → "Create Multi-Output Device"
+   - Check both your speakers/headphones **and** BlackHole 2ch
+   - Ensure your speakers are listed first
+
+3. Set the Multi-Output Device as your system output in **System Settings → Sound**
+
+4. Enable in `settings.yaml`:
+   ```yaml
+   system_audio:
+     enabled: true
+   ```
+
+The tool auto-detects BlackHole by name. If using a different virtual audio device, set `device` to a substring of its name.
+
+### Volume adjustment
+
+macOS may lower system audio volume when an app opens a mic input stream. If system audio sounds quieter than expected, increase `gain` in settings (e.g. `1.5` to boost 50%).
+
+### Output
+
+When enabled, mic and system audio are recorded and transcribed separately, then merged chronologically with `[mic]`/`[system]` source tags.
+
 ## Features
 
 - Interactive audio device selection
 - Real-time recording level display
+- System audio capture alongside mic via BlackHole or similar virtual devices
 - Transcripts saved as markdown with YAML frontmatter in `transcripts/YYYY-MM-DD/`
 - Optional speaker diarization using pyannote
 - Optional AI summarization using LFM2
