@@ -44,7 +44,7 @@ def load_settings() -> dict:
             "topics": "List the main topics and subjects that were discussed.",
         },
     }
-    diarization_defaults = {"enabled": False, "backend": "sortformer", "model": DIARIZATION_MODEL, "threshold": 0.5, "min_duration": 0.0, "merge_gap": 0.0, "pyannote_model": PYANNOTE_MODEL, "min_speakers": None, "max_speakers": None}
+    diarization_defaults = {"enabled": True, "backend": "sortformer", "model": DIARIZATION_MODEL, "threshold": 0.5, "min_duration": 0.0, "merge_gap": 0.0, "pyannote_model": PYANNOTE_MODEL, "min_speakers": None, "max_speakers": None}
     system_audio_defaults = {"enabled": False, "device": None, "output": "recording_system.wav", "gain": 1.0}
     defaults = {"output": "recording.wav", "language": "English", "sample_rate": 16000, "level_bar_width": 30, "transcribe_only": None, "summarization": summarization_defaults, "diarization": diarization_defaults, "system_audio": system_audio_defaults}
     if SETTINGS_FILE.exists():
