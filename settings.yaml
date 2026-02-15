@@ -12,7 +12,13 @@ system_audio:
 
 diarization:
   enabled: true
-  model: pyannote/speaker-diarization-community-1
+  backend: sortformer  # sortformer (default, MLX-native) or pyannote
+  model: mlx-community/diar_sortformer_4spk-v1-fp32
+  threshold: 0.5
+  min_duration: 0.0
+  merge_gap: 0.0
+  # Pyannote-only settings (used when backend: pyannote)
+  pyannote_model: pyannote/speaker-diarization-community-1
   min_speakers: null
   max_speakers: null
 

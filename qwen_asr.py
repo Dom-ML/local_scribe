@@ -22,7 +22,8 @@ SETTINGS_FILE = Path(__file__).parent / "settings.yaml"
 TRANSCRIPTS_DIR = Path(__file__).parent / "transcripts"
 MODEL_NAME = "mlx-community/Qwen3-ASR-0.6B-8bit"
 SUMMARIZATION_MODEL = "mlx-community/LFM2-2.6B-Transcript-4bit"
-DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"
+DIARIZATION_MODEL = "mlx-community/diar_sortformer_4spk-v1-fp32"
+PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 def load_settings() -> dict:
@@ -43,7 +44,7 @@ def load_settings() -> dict:
             "topics": "List the main topics and subjects that were discussed.",
         },
     }
-    diarization_defaults = {"enabled": False, "model": DIARIZATION_MODEL, "min_speakers": None, "max_speakers": None}
+    diarization_defaults = {"enabled": False, "backend": "sortformer", "model": DIARIZATION_MODEL, "threshold": 0.5, "min_duration": 0.0, "merge_gap": 0.0, "pyannote_model": PYANNOTE_MODEL, "min_speakers": None, "max_speakers": None}
     system_audio_defaults = {"enabled": False, "device": None, "output": "recording_system.wav", "gain": 1.0}
     defaults = {"output": "recording.wav", "language": "English", "sample_rate": 16000, "level_bar_width": 30, "transcribe_only": None, "summarization": summarization_defaults, "diarization": diarization_defaults, "system_audio": system_audio_defaults}
     if SETTINGS_FILE.exists():
@@ -165,16 +166,43 @@ def save_audio(audio: np.ndarray, output_path: str, sample_rate: int) -> None:
 
 def diarize(audio_path: str, settings: dict) -> list[dict]:
     """Run speaker diarization on audio file. Returns list of segments with start, end, speaker."""
-    import torch
-    from pyannote.audio import Pipeline
+    backend = settings["diarization"].get("backend", "sortformer")
+    if backend == "pyannote":
+        return _diarize_pyannote(audio_path, settings)
+    return _diarize_sortformer(audio_path, settings)
+
+
+def _diarize_sortformer(audio_path: str, settings: dict) -> list[dict]:
+    """Run diarization using Sortformer (MLX-native). Supports up to 4 speakers."""
+    import mlx.core as mx
+    from mlx_audio.vad import load as load_vad
+
+    diar_settings = settings["diarization"]
+    print("Running speaker diarization (Sortformer)...")
+    model = load_vad(diar_settings["model"])
+    result = model.generate(audio_path, threshold=diar_settings["threshold"], min_duration=diar_settings["min_duration"], merge_gap=diar_settings["merge_gap"])
+    segments = [{"start": seg.start, "end": seg.end, "speaker": f"SPEAKER_{seg.speaker}"} for seg in result.segments]
+
+    del model, result
+    mx.clear_cache()
+    return segments
+
+
+def _diarize_pyannote(audio_path: str, settings: dict) -> list[dict]:
+    """Run diarization using pyannote (PyTorch-based). Requires HF_TOKEN and pyannote.audio installed."""
+    try:
+        import torch
+        from pyannote.audio import Pipeline
+    except ImportError:
+        raise ImportError("pyannote backend requires pyannote.audio. Install with: uv sync --extra pyannote")
 
     hf_token = os.environ.get("HF_TOKEN")
     if not hf_token:
-        raise ValueError("HF_TOKEN environment variable required for diarization. Create a .env file with your token.")
+        raise ValueError("HF_TOKEN environment variable required for pyannote diarization. Create a .env file with your token.")
 
     diar_settings = settings["diarization"]
-    print("Running speaker diarization...")
-    pipeline = Pipeline.from_pretrained(diar_settings["model"], token=hf_token)
+    print("Running speaker diarization (pyannote)...")
+    pipeline = Pipeline.from_pretrained(diar_settings["pyannote_model"], token=hf_token)
 
     if torch.backends.mps.is_available():
         pipeline.to(torch.device("mps"))
@@ -405,6 +433,14 @@ def _process_audio(audio_path: str, settings: dict) -> tuple[list[dict] | None, 
     return None, text
 
 
+def _active_diarization_model(settings: dict) -> str:
+    """Return the model name for the active diarization backend."""
+    diar_settings = settings["diarization"]
+    if diar_settings.get("backend") == "pyannote":
+        return diar_settings["pyannote_model"]
+    return diar_settings["model"]
+
+
 def main() -> None:
     """Main entry point."""
     settings = load_settings()
@@ -430,7 +466,7 @@ def main() -> None:
             segments = mic_segments
             system_device_name = None
         summary = summarize(text, settings, now, segments=segments) if sum_settings["enabled"] else None
-        filepath = save_transcript(text, "file", settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None, system_device_name=system_device_name)
+        filepath = save_transcript(text, "file", settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=_active_diarization_model(settings) if segments else None, system_device_name=system_device_name)
         print_transcript(segments, text)
         if summary:
             print(f"\n## Summary ({sum_settings['summary_type']})\n\n{summary}")
@@ -462,7 +498,7 @@ def main() -> None:
         segments, text = _process_audio(settings["output"], settings)
 
     summary = summarize(text, settings, now, duration_seconds, segments=segments) if sum_settings["enabled"] else None
-    filepath = save_transcript(text, device_name, settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=diar_settings["model"] if segments else None, system_device_name=sys_device_name)
+    filepath = save_transcript(text, device_name, settings["language"], summary=summary, summary_type=sum_settings["summary_type"] if summary else None, summary_model=sum_settings["model"] if summary else None, segments=segments, diarization_model=_active_diarization_model(settings) if segments else None, system_device_name=sys_device_name)
     print_transcript(segments, text)
     if summary:
         print(f"\n## Summary ({sum_settings['summary_type']})\n\n{summary}")

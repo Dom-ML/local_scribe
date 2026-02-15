@@ -11,9 +11,13 @@ venv/
 
 # uv
 .python-version
+uv.lock
 
 # Audio files
 *.wav
+
+# IDE
+.idea/
 
 # Claude Code
 CLAUDE.md

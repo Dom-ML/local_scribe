@@ -31,10 +31,16 @@ system_audio:
   gain: 1.0                   # Multiplier for system audio volume (e.g. 1.5 to boost 50%)
 
 diarization:
-  enabled: false       # Set to true to identify speakers
-  model: pyannote/speaker-diarization-community-1
-  min_speakers: null   # Optional: minimum number of speakers
-  max_speakers: null   # Optional: maximum number of speakers
+  enabled: false         # Set to true to identify speakers
+  backend: sortformer    # sortformer (default, MLX-native) or pyannote
+  model: mlx-community/diar_sortformer_4spk-v1-fp32
+  threshold: 0.5         # Activity detection sensitivity (0-1)
+  min_duration: 0.0      # Minimum segment length in seconds
+  merge_gap: 0.0         # Max gap to merge adjacent segments
+  # Pyannote-only settings (used when backend: pyannote)
+  pyannote_model: pyannote/speaker-diarization-community-1
+  min_speakers: null
+  max_speakers: null
 
 summarization:
   enabled: false       # Set to true to enable AI summarization
@@ -44,21 +50,31 @@ summarization:
 
 ## Speaker Diarization Setup
 
-Speaker diarization identifies and labels different speakers in the audio. To enable:
+Speaker diarization identifies and labels different speakers in the audio (up to 4 speakers).
 
-1. Create a [HuggingFace account](https://huggingface.co/join) and generate an [access token](https://huggingface.co/settings/tokens)
+The default backend is **Sortformer** — an MLX-native model that requires zero configuration:
 
-2. Accept the model terms at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
+```yaml
+diarization:
+  enabled: true
+```
 
-3. Create a `.env` file with your token (see `.env.example`):
+### Alternative: pyannote backend
+
+If you need more than 4 speakers or prefer pyannote, you can use it as an alternative backend:
+
+1. Install the optional dependency: `uv sync --extra pyannote`
+2. Create a [HuggingFace account](https://huggingface.co/join) and generate an [access token](https://huggingface.co/settings/tokens)
+3. Accept the model terms at [pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1)
+4. Create a `.env` file with your token (see `.env.example`):
    ```
    HF_TOKEN=your_token_here
    ```
-
-4. Enable in `settings.yaml`:
+5. Set the backend in `settings.yaml`:
    ```yaml
    diarization:
      enabled: true
+     backend: pyannote
    ```
 
 ## System Audio Capture (Optional)
@@ -102,6 +118,6 @@ When enabled, mic and system audio are recorded and transcribed separately, then
 - Real-time recording level display
 - System audio capture alongside mic via BlackHole or similar virtual devices
 - Transcripts saved as markdown with YAML frontmatter in `transcripts/YYYY-MM-DD/`
-- Optional speaker diarization using pyannote
+- Optional speaker diarization using Sortformer (MLX-native) or pyannote
 - Optional AI summarization using LFM2
 - Models cached locally in `models/` directory
