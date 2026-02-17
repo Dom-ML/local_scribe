@@ -29,7 +29,7 @@ PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 def load_settings() -> dict:
     """Load settings from YAML file."""
     summarization_defaults = {
-        "enabled": False,
+        "enabled": True,
         "model": SUMMARIZATION_MODEL,
         "temperature": 0.3,
         "max_tokens": 512,

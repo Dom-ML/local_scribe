@@ -118,6 +118,6 @@ When enabled, mic and system audio are recorded and transcribed separately, then
 - Real-time recording level display
 - System audio capture alongside mic via BlackHole or similar virtual devices
 - Transcripts saved as markdown with YAML frontmatter in `transcripts/YYYY-MM-DD/`
-- Optional speaker diarization using Sortformer (MLX-native) or pyannote
-- Optional AI summarization using LFM2
+- Speaker diarization using Sortformer (MLX-native) or pyannote
+- AI summarization using LFM2
 - Models cached locally in `models/` directory
