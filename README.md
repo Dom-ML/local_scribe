@@ -31,7 +31,7 @@ system_audio:
   gain: 1.0                   # Multiplier for system audio volume (e.g. 1.5 to boost 50%)
 
 diarization:
-  enabled: false         # Set to true to identify speakers
+  enabled: true          # Enabled by default
   backend: sortformer    # sortformer (default, MLX-native) or pyannote
   model: mlx-community/diar_sortformer_4spk-v1-fp32
   threshold: 0.5         # Activity detection sensitivity (0-1)
@@ -43,7 +43,7 @@ diarization:
   max_speakers: null
 
 summarization:
-  enabled: false       # Set to true to enable AI summarization
+  enabled: true        # Enabled by default
   model: mlx-community/LFM2-2.6B-Transcript-4bit
   summary_type: executive  # executive, detailed, action_items, key_decisions, participants, topics
 ```
